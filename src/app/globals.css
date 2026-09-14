@@ -1,0 +1,59 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: #0f172a;
+  color: #e2e8f0;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* CSS-only utilities (no @apply needed with Tailwind CDN) */
+.glass-card {
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(51, 65, 85, 0.3);
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.glass-card-hover {
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(51, 65, 85, 0.3);
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+.glass-card-hover:hover {
+  border-color: rgba(59, 130, 246, 0.2);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.05);
+}
+
+@keyframes printEject {
+  0% { transform: translateY(-40px) scale(0.95); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+@keyframes scanline {
+  0% { top: 0%; opacity: 0.8; }
+  50% { opacity: 1; }
+  100% { top: 96%; opacity: 0.8; }
+}
+.animate-print-eject { animation: printEject 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.scanner-line { animation: scanline 2.2s ease-in-out infinite alternate; }
+
+.receipt-perforated {
+  background-image: radial-gradient(circle at 10px -5px, transparent 10px, #ffffff 11px);
+  background-size: 20px 20px;
+}
+.zigzag-edge {
+  background: linear-gradient(135deg, #f8fafc 8px, transparent 0), linear-gradient(-135deg, #f8fafc 8px, transparent 0);
+  background-position: left bottom;
+  background-repeat: repeat-x;
+  background-size: 16px 16px;
+}
