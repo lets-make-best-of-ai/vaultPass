@@ -7,3 +7,5 @@ node_modules/
 *.md
 !README.md
 tsconfig.tsbuildinfo
+supabase/.temp/
+supabase/.temp
