@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS public.visitors (
     full_name TEXT NOT NULL,
     phone TEXT NOT NULL,
     email TEXT UNIQUE,
+    payment_method TEXT DEFAULT 'CASH' CHECK (payment_method IN ('CASH', 'CARD')),
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -227,6 +228,7 @@ CREATE OR REPLACE FUNCTION public.register_visitor(
     p_full_name TEXT,
     p_phone TEXT,
     p_email TEXT,
+    p_payment_method TEXT DEFAULT 'CASH',
     p_notes TEXT DEFAULT NULL
 )
 RETURNS JSONB
@@ -239,8 +241,8 @@ DECLARE
     v_qr_hash TEXT;
 BEGIN
     -- Insert visitor
-    INSERT INTO public.visitors (full_name, phone, email, notes)
-    VALUES (p_full_name, p_phone, p_email, p_notes)
+    INSERT INTO public.visitors (full_name, phone, email, payment_method, notes)
+    VALUES (p_full_name, p_phone, p_email, p_payment_method, p_notes)
     RETURNING id INTO v_visitor_id;
 
     -- Generate unique QR hash
@@ -323,6 +325,7 @@ GRANT EXECUTE ON FUNCTION public.process_vendor_deduction TO anon, authenticated
 GRANT EXECUTE ON FUNCTION public.replace_lost_ticket TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.register_visitor TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.top_up_wallet TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.register_visitor(TEXT, TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
 
 -- ============================================================
 -- ROW-LEVEL SECURITY POLICIES

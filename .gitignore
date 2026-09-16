@@ -9,3 +9,4 @@ node_modules/
 tsconfig.tsbuildinfo
 supabase/.temp/
 supabase/.temp
+.vercel

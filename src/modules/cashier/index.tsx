@@ -45,6 +45,7 @@ export default function CashierStation() {
   const [regPhone, setRegPhone] = useState('+1 (555) 349-8821');
   const [regEmail, setRegEmail] = useState('taylor.reed@livemusic.org');
   const [regDepositAmount, setRegDepositAmount] = useState(50);
+  const [regPaymentMethod, setRegPaymentMethod] = useState<'CASH' | 'CARD'>('CASH');
 
   // --- Top-up state ---
   const [topupSearchQuery, setTopupSearchQuery] = useState('');
@@ -105,7 +106,7 @@ export default function CashierStation() {
     }
     setLoading(true);
     try {
-      const data = await registerVisitor(regName, regPhone, regEmail || null);
+      const data = await registerVisitor(regName, regPhone, regEmail || null, regPaymentMethod);
       const walletId = data.wallet_id || 'WLT-' + Math.floor(1000 + Math.random() * 9000) + '-EVT';
       const qrHash = data.qr_code_hash || walletId;
 
@@ -496,6 +497,42 @@ export default function CashierStation() {
                     className="absolute right-2 top-2 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-400 hover:text-slate-200 border border-slate-700 transition"
                   >
                     $0 Free
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <div className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-2 flex items-center gap-1.5">
+                  <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Payment Method</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setRegPaymentMethod('CASH')}
+                    className={`py-3 rounded-xl text-sm font-mono font-bold transition active:scale-95 flex items-center justify-center gap-2 ${
+                      regPaymentMethod === 'CASH'
+                        ? 'bg-emerald-500/20 border-2 border-emerald-500 text-emerald-400 shadow-sm'
+                        : 'bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700'
+                    }`}
+                  >
+                    <CircleDollarSign className="w-4 h-4" />
+                    Cash
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRegPaymentMethod('CARD')}
+                    className={`py-3 rounded-xl text-sm font-mono font-bold transition active:scale-95 flex items-center justify-center gap-2 ${
+                      regPaymentMethod === 'CARD'
+                        ? 'bg-blue-500/20 border-2 border-blue-500 text-blue-400 shadow-sm'
+                        : 'bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+                      <line x1="1" y1="10" x2="23" y2="10" />
+                    </svg>
+                    Card
                   </button>
                 </div>
               </div>

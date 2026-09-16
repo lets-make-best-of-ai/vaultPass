@@ -5,12 +5,14 @@ export async function registerVisitor(
   fullName: string,
   phone: string,
   email: string | null,
+  paymentMethod: string = 'CASH',
   notes: string | null = null
 ) {
   const { data, error } = await supabase.rpc('register_visitor', {
     p_full_name: fullName,
     p_phone: phone,
     p_email: email,
+    p_payment_method: paymentMethod,
     p_notes: notes,
   });
   if (error) throw new Error(error.message);
