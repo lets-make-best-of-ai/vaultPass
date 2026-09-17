@@ -324,6 +324,26 @@ END;
 $$;
 
 -- ============================================================
+-- -- ============================================================
+-- STORED PROCEDURE: get_visitors_by_phone
+-- Look up visitor(s) by phone number
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.get_visitors_by_phone(p_phone TEXT)
+RETURNS TABLE(id UUID, full_name TEXT, phone TEXT, email TEXT, payment_method TEXT, notes TEXT, created_at TIMESTAMPTZ)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT v.id, v.full_name, v.phone, v.email, v.payment_method, v.notes, v.created_at
+    FROM public.visitors v
+    WHERE v.phone = p_phone;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_visitors_by_phone TO anon, authenticated;
+
+-- ============================================================
 -- STORED PROCEDURE: get_recent_transactions
 -- Return last 20 transactions with visitor info
 -- ============================================================
