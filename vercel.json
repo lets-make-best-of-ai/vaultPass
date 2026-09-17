@@ -5,7 +5,7 @@
   "framework": "nextjs",
   "regions": ["iad1"],
   "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": "@NEXT_PUBLIC_SUPABASE_URL",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@NEXT_PUBLIC_SUPABASE_ANON_KEY"
+    "NEXT_PUBLIC_SUPABASE_URL": "https://qrizdhchjbkshgvojqcn.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFyaXpkaGNoamJrc2hndm9qcWNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1MTAyMTgsImV4cCI6MjEwNTA4NjIxOH0.WDiiEfVcjGfPNnpdCTz9HUHmelJz3YONb01O0FfgQTk"
   }
 }
