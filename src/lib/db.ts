@@ -20,10 +20,9 @@ export async function registerVisitor(
 }
 
 export async function getVisitorsByPhone(phone: string) {
-  const { data, error } = await supabase
-    .from('visitors')
-    .select('*')
-    .eq('phone', phone);
+  const { data, error } = await supabase.rpc('get_visitors_by_phone', {
+    p_phone: phone,
+  });
   if (error) throw new Error(error.message);
   return data;
 }
