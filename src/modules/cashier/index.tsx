@@ -7,14 +7,14 @@ import {
   Ban, Camera, X, PlusCircle, Check, AlertCircle, Printer as PrinterIcon,
   ChevronRight, Wrench
 } from 'lucide-react';
-import { registerVisitor, topUpWallet, replaceLostTicket } from '@/lib/db';
+import { registerVisitor, topUpWallet, replaceLostTicket, getRecentTransactions, voidTransaction, getVisitorsByPhone } from '@/lib/db';
 import { printQRWalletTicket, printTopUpReceipt, printReplacementReceipt, requestUSBDevice } from '@/lib/printer';
 import { formatCurrency } from '@/lib/utils';
 import Button from '@/components/ui/button';
 import Card from '@/components/ui/card';
 
 // Tab types
-type Tab = 'register' | 'topup' | 'recovery';
+type Tab = 'register' | 'topup' | 'recovery' | 'history';
 
 // Toast types
 interface Toast {
@@ -68,6 +68,15 @@ export default function CashierStation() {
   });
   const [showRecoveryDetails, setShowRecoveryDetails] = useState(false);
   const [showVoidModal, setShowVoidModal] = useState(false);
+
+  // --- History state ---
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [showTransactionVoidModal, setShowTransactionVoidModal] = useState(false);
+  const [voidingTxId, setVoidingTxId] = useState<string | null>(null);
+
+  // --- Top-up visitor selection state ---
+  const [topupVisitors, setTopupVisitors] = useState<any[]>([]);
+  const [topupSelectedVisitor, setTopupSelectedVisitor] = useState<any>(null);
 
   // --- Modals ---
   const [showScannerModal, setShowScannerModal] = useState(false);
@@ -137,6 +146,78 @@ export default function CashierStation() {
     }
   }, [regName, regPhone, regEmail, regDepositAmount, showToast]);
 
+  // --- Load recent transactions ---
+  const loadTransactions = useCallback(async () => {
+    try {
+      const data = await getRecentTransactions();
+      setTransactions(data || []);
+    } catch (err: any) {
+      showToast(err.message, 'danger');
+    }
+  }, [showToast]);
+
+  // --- Void a transaction ---
+  const handleVoidClick = useCallback((txId: string) => {
+    setVoidingTxId(txId);
+    setShowTransactionVoidModal(true);
+  }, []);
+
+  const confirmVoid = useCallback(async () => {
+    if (!voidingTxId) return;
+    setLoading(true);
+    try {
+      await voidTransaction(voidingTxId);
+      setTransactions(prev => prev.map(t => t.id === voidingTxId ? { ...t, status: 'VOIDED' } : t));
+      setShowTransactionVoidModal(false);
+      setVoidingTxId(null);
+      showToast('Transaction marked as VOIDED', 'success');
+    } catch (err: any) {
+      showToast(err.message, 'danger');
+    } finally {
+      setLoading(false);
+    }
+  }, [voidingTxId, showToast]);
+
+  // --- Top-up: lookup by phone with duplicate handling ---
+  const handleTopupLookup = useCallback(async () => {
+    if (!topupSearchQuery.trim()) {
+      showToast('Please enter phone to lookup', 'warning');
+      return;
+    }
+    try {
+      const visitors = await getVisitorsByPhone(topupSearchQuery);
+      if (visitors.length === 0) {
+        showToast('No visitor found with this phone', 'warning');
+        setTopupVisitors([]);
+        setTopupSelectedVisitor(null);
+        setHasWallet(false);
+      } else if (visitors.length === 1) {
+        const v = visitors[0];
+        setActiveTopupWallet({ name: v.full_name, phone: v.phone, balance: 0, walletId: v.wallets?.[0]?.id || 'N/A' });
+        setTopupSelectedVisitor(v);
+        setHasWallet(true);
+        setTopupVisitors([]);
+        showToast('Wallet located for: ' + v.full_name, 'success');
+      } else {
+        setTopupVisitors(visitors);
+        setTopupSelectedVisitor(null);
+        setHasWallet(false);
+        showToast(`${visitors.length} visitors found — select one`, 'warning');
+      }
+    } catch (err: any) {
+      showToast(err.message, 'danger');
+    }
+  }, [topupSearchQuery, showToast]);
+
+  // --- Top-up: select visitor from list ---
+  const selectVisitor = useCallback((v: any) => {
+    setActiveTopupWallet({ name: v.full_name, phone: v.phone, balance: 0, walletId: v.wallets?.[0]?.id || 'N/A' });
+    setTopupSelectedVisitor(v);
+    setHasWallet(true);
+    setTopupVisitors([]);
+    showToast('Wallet located for: ' + v.full_name, 'success');
+  }, [showToast]);
+
   // --- Top-up: open scanner ---
   const triggerCameraScanner = useCallback(() => {
     setShowScannerModal(true);
@@ -161,20 +242,8 @@ export default function CashierStation() {
 
   // --- Top-up: lookup ---
   const performLookup = useCallback(() => {
-    if (!topupSearchQuery.trim()) {
-      showToast('Please enter phone or name to lookup', 'warning');
-      return;
-    }
-    const wallet = {
-      name: 'Jordan Lee',
-      phone: '+1 (555) 782-9014',
-      balance: 34.50,
-      walletId: 'WLT-8921-QR'
-    };
-    setActiveTopupWallet(wallet);
-    setHasWallet(true);
-    showToast('Wallet located for query: ' + topupSearchQuery, 'success');
-  }, [topupSearchQuery, showToast]);
+    handleTopupLookup();
+  }, [handleTopupLookup]);
 
   // --- Top-up: quick amount ---
   const setTopupAmount = useCallback((val: number) => {
@@ -347,42 +416,53 @@ export default function CashierStation() {
 
       {/* SUB-NAV / TAB SWITCHER */}
       <div className="max-w-md mx-auto px-3.5 pt-3 mb-4">
-        <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl">
-          <button
-            onClick={() => switchTab('register')}
-            className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-xl font-medium text-xs transition-all duration-200 ${
-              activeTab === 'register'
-                ? 'bg-emerald-500 text-slate-950 shadow-md font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <User className="w-4 h-4 mb-1" />
-            <span>1. Register</span>
-          </button>
-          <button
-            onClick={() => switchTab('topup')}
-            className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-xl font-medium text-xs transition-all duration-200 ${
-              activeTab === 'topup'
-                ? 'bg-emerald-500 text-slate-950 shadow-md font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <CircleDollarSign className="w-4 h-4 mb-1" />
-            <span>2. Top-Up</span>
-          </button>
-          <button
-            onClick={() => switchTab('recovery')}
-            className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-xl font-medium text-xs transition-all duration-200 ${
-              activeTab === 'recovery'
-                ? 'bg-emerald-500 text-slate-950 shadow-md font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <ShieldAlert className="w-4 h-4 mb-1" />
-            <span>3. Lost Ticket</span>
-          </button>
-        </div>
-      </div>
+<div className="grid grid-cols-4 gap-1.5 p-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl">
+           <button
+             onClick={() => switchTab('register')}
+             className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-xl font-medium text-xs transition-all duration-200 ${
+               activeTab === 'register'
+                 ? 'bg-emerald-500 text-slate-950 shadow-md font-bold'
+                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+             }`}
+           >
+             <User className="w-4 h-4 mb-1" />
+             <span>1. Register</span>
+           </button>
+           <button
+             onClick={() => switchTab('topup')}
+             className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-xl font-medium text-xs transition-all duration-200 ${
+               activeTab === 'topup'
+                 ? 'bg-emerald-500 text-slate-950 shadow-md font-bold'
+                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+             }`}
+           >
+             <CircleDollarSign className="w-4 h-4 mb-1" />
+             <span>2. Top-Up</span>
+           </button>
+           <button
+             onClick={() => switchTab('history')}
+             className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-xl font-medium text-xs transition-all duration-200 ${
+               activeTab === 'history'
+                 ? 'bg-blue-500 text-slate-950 shadow-md font-bold'
+                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+             }`}
+           >
+             <Database className="w-4 h-4 mb-1" />
+             <span>3. History</span>
+           </button>
+           <button
+             onClick={() => switchTab('recovery')}
+             className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-xl font-medium text-xs transition-all duration-200 ${
+               activeTab === 'recovery'
+                 ? 'bg-emerald-500 text-slate-950 shadow-md font-bold'
+                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+             }`}
+           >
+             <ShieldAlert className="w-4 h-4 mb-1" />
+             <span>4. Lost Ticket</span>
+           </button>
+         </div>
+       </div>
 
       {/* TAB 1: NEW VISITOR REGISTRATION */}
       {activeTab === 'register' && (
@@ -590,43 +670,60 @@ export default function CashierStation() {
               <div className="flex-grow border-t border-slate-800" />
             </div>
 
-            <div className="mt-2 relative">
-              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                <Search className="w-4 h-4" />
-              </span>
-              <input
-                type="text"
-                value={topupSearchQuery}
-                onChange={e => setTopupSearchQuery(e.target.value)}
-                placeholder="Enter phone e.g. 555 or name..."
-                className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-10 pr-20 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 font-medium"
-              />
-              <button
-                onClick={performLookup}
-                className="absolute right-2 top-2 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold transition"
-              >
-                Lookup
-              </button>
-            </div>
+<div className="mt-2 relative">
+               <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                 <Search className="w-4 h-4" />
+               </span>
+               <input
+                 type="text"
+                 value={topupSearchQuery}
+                 onChange={e => setTopupSearchQuery(e.target.value)}
+                 onKeyDown={e => e.key === 'Enter' && handleTopupLookup()}
+                 placeholder="Enter phone number..."
+                 className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-10 pr-20 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 font-medium"
+               />
+               <button
+                 onClick={handleTopupLookup}
+                 className="absolute right-2 top-2 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold transition"
+               >
+                 Lookup
+               </button>
+             </div>
 
-            <div className="flex items-center gap-1.5 mt-2.5 text-[11px] text-slate-400 overflow-x-auto pb-1">
-              <span className="shrink-0 text-slate-500">Try sample:</span>
-              <button
-                onClick={() => { setActiveTopupWallet({ name: 'Jordan Lee', phone: '+1 (555) 782-9014', balance: 34.50, walletId: 'WLT-8921-QR' }); setHasWallet(true); }}
-                className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 hover:text-white font-mono shrink-0"
-              >
-                Jordan ($34.50)
-              </button>
-              <button
-                onClick={() => { setActiveTopupWallet({ name: 'Elena Rostova', phone: '+1 (555) 441-2099', balance: 12.00, walletId: 'WLT-4412-QR' }); setHasWallet(true); }}
-                className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 hover:text-white font-mono shrink-0"
-              >
-                Elena ($12.00)
-              </button>
-            </div>
-          </Card>
+             {topupVisitors.length > 0 && (
+               <div className="mt-3 space-y-2">
+                 <p className="text-xs font-bold text-slate-400 uppercase">Select a visitor:</p>
+                 {topupVisitors.map((v, i) => (
+                   <button
+                     key={i}
+                     onClick={() => selectVisitor(v)}
+                     className="w-full p-3 bg-slate-800/80 border border-slate-700 rounded-xl text-left hover:border-amber-500 transition"
+                   >
+                     <div className="font-bold text-white text-sm">{v.full_name}</div>
+                     <div className="text-xs font-mono text-slate-400">{v.phone}</div>
+                   </button>
+                 ))}
+               </div>
+             )}
 
-          {hasWallet && (
+             <div className="flex items-center gap-1.5 mt-2.5 text-[11px] text-slate-400 overflow-x-auto pb-1">
+               <span className="shrink-0 text-slate-500">Try sample:</span>
+               <button
+                 onClick={() => { setActiveTopupWallet({ name: 'Jordan Lee', phone: '+1 (555) 782-9014', balance: 34.50, walletId: 'WLT-8921-QR' }); setHasWallet(true); }}
+                 className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 hover:text-white font-mono shrink-0"
+               >
+                 Jordan ($34.50)
+               </button>
+               <button
+                 onClick={() => { setActiveTopupWallet({ name: 'Elena Rostova', phone: '+1 (555) 441-2099', balance: 12.00, walletId: 'WLT-4412-QR' }); setHasWallet(true); }}
+                 className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 hover:text-white font-mono shrink-0"
+               >
+                 Elena ($12.00)
+               </button>
+             </div>
+           </Card>
+
+           {hasWallet && (
             <div className="bg-gradient-to-b from-slate-900 to-slate-900/90 border-2 border-emerald-500/50 rounded-2xl p-4 shadow-xl relative overflow-hidden">
               <div className="absolute -right-6 -top-6 w-24 h-24 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
               <div className="flex items-start justify-between">
@@ -691,7 +788,82 @@ export default function CashierStation() {
         </div>
       )}
 
-      {/* TAB 3: LOST TICKET RECOVERY */}
+      {/* TAB 3: TRANSACTION HISTORY */}
+      {activeTab === 'history' && (
+        <div className="max-w-md mx-auto px-3.5 space-y-4">
+          <Card variant="glass">
+            <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <span>Transaction History</span>
+                  <span className="text-[10px] bg-blue-950 text-blue-400 border border-blue-800 px-1.5 py-0.5 rounded font-mono">Last 20</span>
+                </h2>
+                <p className="text-xs text-slate-400">Recent transactions. Void if needed.</p>
+              </div>
+              <button
+                onClick={loadTransactions}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold transition border border-slate-700"
+              >
+                ↻ Refresh
+              </button>
+            </div>
+
+            {transactions.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-slate-500 text-sm">No transactions found</p>
+                <button
+                  onClick={loadTransactions}
+                  className="mt-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded-lg text-xs font-bold border border-emerald-500/30 hover:bg-emerald-500/30 transition"
+                >
+                  Load Transactions
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {transactions.map(tx => (
+                  <div
+                    key={tx.id}
+                    className={`p-3 rounded-xl border ${
+                      tx.status === 'VOIDED'
+                        ? 'bg-slate-800/50 border-slate-700/50 opacity-60'
+                        : 'bg-slate-800/80 border-emerald-500/20'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white text-sm">{tx.visitor_name || 'Unknown'}</span>
+                          {tx.status === 'VOIDED' && (
+                            <span className="text-[9px] bg-rose-950 text-rose-400 px-1.5 py-0.5 rounded font-mono font-bold">VOIDED</span>
+                          )}
+                        </div>
+                        <p className="text-xs font-mono text-slate-400">{tx.visitor_phone}</p>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold text-white text-sm">{formatCurrency(tx.amount)}</div>
+                        <div className="text-[10px] font-mono text-slate-500">{tx.type} • {tx.id?.slice(0,8)}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-700/50">
+                      <span className="text-[10px] font-mono text-slate-500">{tx.created_at ? new Date(tx.created_at).toLocaleString() : ''}</span>
+                      {tx.status !== 'VOIDED' && (
+                        <button
+                          onClick={() => handleVoidClick(tx.id)}
+                          className="px-2 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded-lg text-[10px] font-bold border border-rose-500/30 transition"
+                        >
+                          Void
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* TAB 4: LOST TICKET RECOVERY */}
       {activeTab === 'recovery' && (
         <div className="max-w-md mx-auto px-3.5 space-y-4">
           <Card variant="glass">
@@ -980,6 +1152,42 @@ export default function CashierStation() {
               >
                 <Check className="w-4 h-4" />
                 <span>{loading ? 'Processing...' : 'Authorize &amp; Print'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRM TRANSACTION VOID */}
+      {showTransactionVoidModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/60 backdrop-blur-[6px]" onClick={() => setShowTransactionVoidModal(false)}>
+          <div className="bg-slate-900 border-2 border-rose-600/80 max-w-sm w-full rounded-2xl p-5 shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/50 flex items-center justify-center text-rose-400 mx-auto">
+              <Ban className="w-6 h-6 stroke-[2.5]" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-lg font-black text-white">Confirm Transaction Void?</h3>
+              <p className="text-xs text-slate-400">This marks the transaction as VOIDED</p>
+            </div>
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs space-y-1 font-mono">
+              <div className="flex justify-between text-slate-400">
+                <span>Transaction ID:</span>
+                <span className="text-white font-bold">{voidingTxId?.slice(0, 12)}...</span>
+              </div>
+              <div className="flex justify-between text-rose-400 pt-1 border-t border-slate-800">
+                <span>Effect:</span>
+                <span className="font-bold">QR Blocked from Withdrawal</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button onClick={() => { setShowTransactionVoidModal(false); setVoidingTxId(null); }} className="py-3 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition border border-slate-700">Cancel</button>
+              <button
+                onClick={confirmVoid}
+                disabled={loading}
+                className="py-3 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-lg shadow-rose-600/30 disabled:opacity-50"
+              >
+                <Check className="w-4 h-4" />
+                <span>{loading ? 'Processing...' : 'Confirm Void'}</span>
               </button>
             </div>
           </div>

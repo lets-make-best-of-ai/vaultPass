@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
     cashier_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     amount NUMERIC(10,2) NOT NULL CHECK (amount > 0),
     type transaction_type NOT NULL,
+    status TEXT DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'VOIDED')),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -71,6 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_wallet_id ON public.transactions(wal
 CREATE INDEX IF NOT EXISTS idx_transactions_vendor_id ON public.transactions(vendor_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON public.transactions(created_at);
 CREATE INDEX IF NOT EXISTS idx_transactions_type ON public.transactions(type);
+CREATE INDEX IF NOT EXISTS idx_transactions_status ON public.transactions(status);
 
 -- ============================================================
 -- UPDATED_AT TRIGGER FOR WALLETS
@@ -240,7 +242,7 @@ DECLARE
     v_wallet_id UUID;
     v_qr_hash TEXT;
 BEGIN
-    -- Insert visitor
+    -- Insert visitor (email no longer unique - allow duplicates)
     INSERT INTO public.visitors (full_name, phone, email, payment_method, notes)
     VALUES (p_full_name, p_phone, p_email, p_payment_method, p_notes)
     RETURNING id INTO v_visitor_id;
@@ -261,6 +263,9 @@ BEGIN
     );
 END;
 $$;
+
+-- Remove email uniqueness constraint (allow duplicate emails)
+ALTER TABLE public.visitors DROP CONSTRAINT IF EXISTS visitors_email_key;
 
 -- ============================================================
 -- STORED PROCEDURE: top_up_wallet
@@ -319,13 +324,86 @@ END;
 $$;
 
 -- ============================================================
+-- STORED PROCEDURE: get_recent_transactions
+-- Return last 20 transactions with visitor info
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.get_recent_transactions()
+RETURNS TABLE(
+    id UUID,
+    wallet_id UUID,
+    amount NUMERIC(10,2),
+    type transaction_type,
+    status TEXT,
+    created_at TIMESTAMPTZ,
+    visitor_name TEXT,
+    visitor_phone TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        t.id,
+        t.wallet_id,
+        t.amount,
+        t.type,
+        t.status,
+        t.created_at,
+        v.full_name,
+        v.phone
+    FROM public.transactions t
+    LEFT JOIN public.wallets w ON t.wallet_id = w.id
+    LEFT JOIN public.visitors v ON w.visitor_id = v.id
+    ORDER BY t.created_at DESC
+    LIMIT 20;
+END;
+$$;
+
+-- ============================================================
+-- STORED PROCEDURE: void_transaction
+-- Mark a transaction as VOIDED (QR blocked from withdrawal)
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.void_transaction(
+    p_transaction_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_current_status TEXT;
+BEGIN
+    SELECT status INTO v_current_status
+    FROM public.transactions
+    WHERE id = p_transaction_id;
+    
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'TRANSACTION_NOT_FOUND');
+    END IF;
+    
+    IF v_current_status = 'VOIDED' THEN
+        RETURN jsonb_build_object('success', false, 'error', 'ALREADY_VOIDED');
+    END IF;
+    
+    UPDATE public.transactions
+    SET status = 'VOIDED'
+    WHERE id = p_transaction_id;
+    
+    RETURN jsonb_build_object('success', true, 'transaction_id', p_transaction_id);
+END;
+$$;
+
+-- ============================================================
 -- GRANT EXECUTE ON FUNCTIONS TO authenticated/anonym roles
 -- ============================================================
 GRANT EXECUTE ON FUNCTION public.process_vendor_deduction TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.replace_lost_ticket TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.register_visitor TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.top_up_wallet TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.register_visitor(TEXT, TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.top_up_wallet TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_recent_transactions TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.void_transaction TO anon, authenticated;
 
 -- ============================================================
 -- ROW-LEVEL SECURITY POLICIES

@@ -19,6 +19,15 @@ export async function registerVisitor(
   return data;
 }
 
+export async function getVisitorsByPhone(phone: string) {
+  const { data, error } = await supabase
+    .from('visitors')
+    .select('*')
+    .eq('phone', phone);
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function topUpWallet(
   walletId: string,
   cashierId: string,
@@ -28,6 +37,20 @@ export async function topUpWallet(
     p_wallet_id: walletId,
     p_cashier_id: cashierId,
     p_amount: amount.toString(),
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function getRecentTransactions() {
+  const { data, error } = await supabase.rpc('get_recent_transactions');
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function voidTransaction(transactionId: string) {
+  const { data, error } = await supabase.rpc('void_transaction', {
+    p_transaction_id: transactionId,
   });
   if (error) throw new Error(error.message);
   return data;
