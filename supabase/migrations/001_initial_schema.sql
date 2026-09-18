@@ -329,14 +329,16 @@ $$;
 -- Look up visitor(s) by phone number
 -- ============================================================
 CREATE OR REPLACE FUNCTION public.get_visitors_by_phone(p_phone TEXT)
-RETURNS TABLE(id UUID, full_name TEXT, phone TEXT, email TEXT, payment_method TEXT, notes TEXT, created_at TIMESTAMPTZ)
+RETURNS TABLE(id UUID, full_name TEXT, phone TEXT, email TEXT, payment_method TEXT, notes TEXT, created_at TIMESTAMPTZ, wallet_id UUID, wallet_balance NUMERIC(10,2), wallet_status TEXT)
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
     RETURN QUERY
-    SELECT v.id, v.full_name, v.phone, v.email, v.payment_method, v.notes, v.created_at
+    SELECT v.id, v.full_name, v.phone, v.email, v.payment_method, v.notes, v.created_at,
+           w.id AS wallet_id, w.balance AS wallet_balance, w.status AS wallet_status
     FROM public.visitors v
+    LEFT JOIN public.wallets w ON w.visitor_id = v.id
     WHERE v.phone = p_phone;
 END;
 $$;

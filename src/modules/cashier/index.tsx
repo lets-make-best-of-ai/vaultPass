@@ -193,7 +193,7 @@ export default function CashierStation() {
         setHasWallet(false);
       } else if (visitors.length === 1) {
         const v = visitors[0];
-        setActiveTopupWallet({ name: v.full_name, phone: v.phone, balance: 0, walletId: v.wallets?.[0]?.id || 'N/A' });
+        setActiveTopupWallet({ name: v.full_name, phone: v.phone, balance: Number(v.wallet_balance) || 0, walletId: v.wallet_id || 'N/A' });
         setTopupSelectedVisitor(v);
         setHasWallet(true);
         setTopupVisitors([]);
@@ -211,7 +211,7 @@ export default function CashierStation() {
 
   // --- Top-up: select visitor from list ---
   const selectVisitor = useCallback((v: any) => {
-    setActiveTopupWallet({ name: v.full_name, phone: v.phone, balance: 0, walletId: v.wallets?.[0]?.id || 'N/A' });
+    setActiveTopupWallet({ name: v.full_name, phone: v.phone, balance: Number(v.wallet_balance) || 0, walletId: v.wallet_id || 'N/A' });
     setTopupSelectedVisitor(v);
     setHasWallet(true);
     setTopupVisitors([]);
@@ -269,7 +269,7 @@ export default function CashierStation() {
     try {
       const cashierId = 'cashier-001'; // In real app, from auth
       const data = await topUpWallet(activeTopupWallet.walletId, cashierId, topupAddAmount);
-      const newBal = activeTopupWallet.balance + topupAddAmount;
+      const newBal = Number(data.new_balance) || activeTopupWallet.balance + topupAddAmount;
       setActiveTopupWallet(prev => ({ ...prev, balance: newBal }));
 
       showToast(`Added +${formatCurrency(topupAddAmount)} to ${activeTopupWallet.name}'s wallet`, 'success');
