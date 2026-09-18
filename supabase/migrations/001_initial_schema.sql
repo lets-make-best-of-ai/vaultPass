@@ -429,47 +429,31 @@ GRANT EXECUTE ON FUNCTION public.void_transaction TO anon, authenticated;
 
 -- ============================================================
 -- ROW-LEVEL SECURITY POLICIES
+-- Disabled on core tables since all writes go through SECURITY DEFINER RPC functions
 -- ============================================================
 
--- Visitors: Authenticated users can read their own visitor records
-ALTER TABLE public.visitors ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Visitors read own profile"
-    ON public.visitors FOR SELECT
-    USING (auth.uid() = id);
+ALTER TABLE public.visitors DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.wallets DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.transactions DISABLE ROW LEVEL SECURITY;
 
--- Vendors: All authenticated users can read active vendors
-ALTER TABLE public.vendors ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Authenticated users can view active vendors"
-    ON public.vendors FOR SELECT
-    USING (auth.role() = 'authenticated' AND is_active = true);
+-- ============================================================
+-- DEFAULT SETUP: Create cashier user and default vendor
+-- ============================================================
 
--- Vendors: Only authenticated users with proper permissions can insert/update
-CREATE POLICY "Authenticated users can manage vendors"
-    ON public.vendors FOR ALL
-    USING (auth.role() = 'authenticated')
-    WITH CHECK (auth.role() = 'authenticated');
+-- Insert cashier user if not exists
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = '00000000-0000-0000-0000-000000000001') THEN
+        INSERT INTO auth.users (id, email, encrypted_password, email_confirmed_at, created_at, updated_at, last_sign_in_at, raw_user_meta_data)
+        VALUES ('00000000-0000-0000-0000-000000000001', 'cashier@vaultpass.local', crypt('cashier123', gen_salt('bf')), NOW(), NOW(), NOW(), NOW(), '{"role":"cashier"}');
+    END IF;
+END;
+$$;
 
--- Wallets: Users can read wallets linked to their visitor profile
-ALTER TABLE public.wallets ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Visitors read own wallets"
-    ON public.wallets FOR SELECT
-    USING (
-        visitor_id IN (SELECT id FROM public.visitors WHERE auth.uid() = visitors.id)
-    );
-
--- Wallets: Authenticated service roles can update balances via RPCs
-CREATE POLICY "Service role can update wallet balances"
-    ON public.wallets FOR UPDATE
-    USING (auth.role() = 'authenticated')
-    WITH CHECK (auth.role() = 'authenticated');
-
--- Transactions: Users can read transactions for their own wallets
-ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users read own wallet transactions"
-    ON public.transactions FOR SELECT
-    USING (
-        wallet_id IN (SELECT id FROM public.wallets WHERE visitor_id IN (SELECT id FROM public.visitors WHERE auth.uid() = visitors.id))
-    );
+-- Insert default vendor if not exists
+INSERT INTO public.vendors (id, name, pin_hash, commission_rate, is_active)
+SELECT '00000000-0000-0000-0000-000000000001'::uuid, 'Default Vendor', md5('1234'), 10.00, true
+WHERE NOT EXISTS (SELECT 1 FROM public.vendors LIMIT 1);
 
 -- ============================================================
 -- ANALYTICS VIEWS FOR ADMIN DASHBOARD

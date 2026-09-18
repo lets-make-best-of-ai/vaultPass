@@ -267,7 +267,7 @@ export default function CashierStation() {
     }
     setLoading(true);
     try {
-      const cashierId = 'cashier-001'; // In real app, from auth
+      const cashierId = '00000000-0000-0000-0000-000000000001'; // In real app, from auth
       const data = await topUpWallet(activeTopupWallet.walletId, cashierId, topupAddAmount);
       const newBal = Number(data.new_balance) || activeTopupWallet.balance + topupAddAmount;
       setActiveTopupWallet(prev => ({ ...prev, balance: newBal }));
