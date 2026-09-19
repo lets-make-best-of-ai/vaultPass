@@ -436,6 +436,9 @@ GRANT EXECUTE ON FUNCTION public.register_visitor(TEXT, TEXT, TEXT, TEXT, TEXT) 
 GRANT EXECUTE ON FUNCTION public.top_up_wallet TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_recent_transactions TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.void_transaction TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.authenticate_vendor TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_vendor_sales TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_vendor_transactions TO anon, authenticated;
 
 -- ============================================================
 -- ROW-LEVEL SECURITY POLICIES
@@ -460,10 +463,101 @@ BEGIN
 END;
 $$;
 
--- Insert default vendor if not exists
-INSERT INTO public.vendors (id, name, pin_hash, commission_rate, is_active)
-SELECT '00000000-0000-0000-0000-000000000001'::uuid, 'Default Vendor', md5('1234'), 10.00, true
+-- ============================================================
+-- ADD LOGIN_CODE COLUMN TO VENDORS TABLE
+-- ============================================================
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'vendors' AND column_name = 'login_code'
+    ) THEN
+        ALTER TABLE public.vendors ADD COLUMN login_code TEXT UNIQUE;
+    END IF;
+END $$;
+
+-- Insert default vendor if not exists (with login_code)
+INSERT INTO public.vendors (id, name, pin_hash, commission_rate, is_active, login_code)
+SELECT '00000000-0000-0000-0000-000000000001'::uuid, 'Default Vendor', md5('1234'), 10.00, true, 'DEFAULT'
 WHERE NOT EXISTS (SELECT 1 FROM public.vendors LIMIT 1);
+
+-- Set login_code for existing default vendor if not already set
+UPDATE public.vendors SET login_code = 'DEFAULT'
+WHERE id = '00000000-0000-0000-0000-000000000001'::uuid
+AND login_code IS NULL;
+
+-- ============================================================
+-- STORED PROCEDURE: authenticate_vendor
+-- Validates a vendor login code and returns vendor info
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.authenticate_vendor(p_login_code TEXT)
+RETURNS TABLE(id UUID, name TEXT, is_active BOOLEAN, login_code TEXT)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT v.id, v.name, v.is_active, v.login_code
+    FROM public.vendors v
+    WHERE v.login_code = p_login_code;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.authenticate_vendor TO anon, authenticated;
+
+-- ============================================================
+-- STORED PROCEDURE: get_vendor_sales
+-- Returns total sales (sum of SPEND transactions) for a vendor
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.get_vendor_sales(p_vendor_id UUID)
+RETURNS TABLE(total_sales NUMERIC(10,2), transaction_count BIGINT)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT COALESCE(SUM(t.amount), 0), COUNT(t.id)
+    FROM public.transactions t
+    WHERE t.vendor_id = p_vendor_id AND t.type = 'SPEND' AND t.status = 'ACTIVE';
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_vendor_sales TO anon, authenticated;
+
+-- ============================================================
+-- STORED PROCEDURE: get_vendor_transactions
+-- Returns all SPEND transactions for a vendor
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.get_vendor_transactions(p_vendor_id UUID)
+RETURNS TABLE(
+    id UUID,
+    wallet_id UUID,
+    amount NUMERIC(10,2),
+    type TEXT,
+    status TEXT,
+    created_at TIMESTAMPTZ,
+    wallet_last4 TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        t.id,
+        t.wallet_id,
+        t.amount,
+        t.type::text,
+        t.status,
+        t.created_at,
+        RIGHT(w.id::text, 4) AS wallet_last4
+    FROM public.transactions t
+    LEFT JOIN public.wallets w ON t.wallet_id = w.id
+    WHERE t.vendor_id = p_vendor_id AND t.type = 'SPEND'
+    ORDER BY t.created_at DESC;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_vendor_transactions TO anon, authenticated;
 
 -- ============================================================
 -- ANALYTICS VIEWS FOR ADMIN DASHBOARD

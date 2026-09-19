@@ -120,6 +120,30 @@ export async function getDailySettlement() {
   return data;
 }
 
+export async function authenticateVendor(loginCode: string) {
+  const { data, error } = await supabase.rpc('authenticate_vendor', {
+    p_login_code: loginCode,
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function getVendorSales(vendorId: string) {
+  const { data, error } = await supabase.rpc('get_vendor_sales', {
+    p_vendor_id: vendorId,
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function getVendorTransactions(vendorId: string) {
+  const { data, error } = await supabase.rpc('get_vendor_transactions', {
+    p_vendor_id: vendorId,
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function generateCSVSettlement(data: any[]) {
   const headers = [
     'Settlement Date',
