@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'login_code is required' }, { status: 400 });
     }
 
-    const { data, error } = await supabase.rpc('authenticate_vendor', {
+    const { data, error } = await supabase.rpc('authenticate_cashier', {
       p_login_code: login_code.trim(),
     });
 
@@ -25,12 +25,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid login code' }, { status: 401 });
     }
 
-    const vendor = rows[0];
-    if (!vendor.is_active) {
-      return NextResponse.json({ error: 'Vendor is not active' }, { status: 403 });
+    const cashier = rows[0];
+    if (!cashier.is_active) {
+      return NextResponse.json({ error: 'Cashier is not active' }, { status: 403 });
     }
 
-    return NextResponse.json({ success: true, vendor });
+    return NextResponse.json({ success: true, cashier });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

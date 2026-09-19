@@ -2,21 +2,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabase } from '@/lib/supabase';
 const supabase = getSupabase();
 
-// GET: Get wallet by ID
-
 export const dynamic = 'force-dynamic';
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const { id } = params;
+    if (!id) {
+      return NextResponse.json({ error: 'Wallet ID is required' }, { status: 400 });
+    }
+
     const { data, error } = await supabase
       .from('wallets')
       .select('*')
-      .eq('id', params.id)
+      .eq('qr_code_hash', id)
       .single();
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 404 });
+    if (error || !data) {
+      return NextResponse.json({ error: 'Wallet not found' }, { status: 404 });
     }
     return NextResponse.json(data);
   } catch (err: any) {

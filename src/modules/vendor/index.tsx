@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { useState, useCallback, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import {
   authenticateVendor,
   getVendorSales,
@@ -14,6 +14,11 @@ import Card from '@/components/ui/card';
 import Badge from '@/components/ui/badge';
 import Spinner from '@/components/ui/spinner';
 import { cn, formatCurrency } from '@/lib/utils';
+
+const QRScannerClient = dynamic(
+  () => import('./QRScannerClient').then((mod) => mod.default),
+  { ssr: false, loading: () => <div id="qr-reader" className="w-full rounded-lg overflow-hidden bg-dark-900" /> }
+);
 
 type Screen = 'login' | 'pos' | 'scan';
 type Tab = 'pos' | 'history';
@@ -40,14 +45,12 @@ export default function VendorPOS() {
   const [deductResult, setDeductResult] = useState<any>(null);
   const [scannerError, setScannerError] = useState('');
 
-  const scannerRef = useRef<Html5Qrcode | null>(null);
-
   const loadSalesData = useCallback(async (vendorId: string) => {
     try {
       const salesData = await getVendorSales(vendorId);
-      if (salesData && salesData[0]) {
-        setTotalSales(Number(salesData[0].total_sales) || 0);
-        setSalesCount(Number(salesData[0].transaction_count) || 0);
+      if (salesData) {
+        setTotalSales(Number(salesData.total_sales) || 0);
+        setSalesCount(Number(salesData.transaction_count) || 0);
       }
     } catch {
       // Silently handle
@@ -84,7 +87,7 @@ export default function VendorPOS() {
       .subscribe();
 
     return () => { channel.unsubscribe(); };
-  }, [screen, vendor]);
+  }, [screen, vendor?.id]);
 
   // Load initial data when entering pos screen
   useEffect(() => {
@@ -103,8 +106,8 @@ export default function VendorPOS() {
 
     try {
       const result = await authenticateVendor(loginCode.trim());
-      if (result && result.length > 0) {
-        setVendor(result[0]);
+      if (result) {
+        setVendor(result);
         setScreen('pos');
         setLoginCode('');
       } else {
@@ -117,44 +120,32 @@ export default function VendorPOS() {
     }
   };
 
-  const startScanner = useCallback(async () => {
-    setScreen('scan');
-    setScannerError('');
-    setScannedWallet(null);
-    setDeductResult(null);
-    setDeductAmount('');
-
+  const handleScanResult = useCallback(async (decodedText: string) => {
     try {
-      const html5Qrcode = new Html5Qrcode('reader');
-      await html5Qrcode.start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        async (decodedText) => {
-          try {
-            await html5Qrcode.stop();
-            scannerRef.current = null;
-            const response = await fetch(`/api/wallet/${decodedText}`);
-            if (!response.ok) throw new Error('Wallet not found');
-            const walletInfo = await response.json();
-            setScannedWallet(walletInfo);
-            setScreen('pos');
-            setTab('pos');
-          } catch (err: any) {
-            setScannerError(err.message);
-          }
-        },
-        () => {}
-      );
-      scannerRef.current = html5Qrcode;
+      const response = await fetch(`/api/wallet/${decodedText}`);
+      if (!response.ok) throw new Error('Wallet not found');
+      const walletInfo = await response.json();
+      setScannedWallet(walletInfo);
+      setScreen('pos');
+      setTab('pos');
     } catch (err: any) {
       setScannerError(err.message);
-      setScreen('pos');
     }
+  }, []);
+
+  const handleScanError = useCallback((error: string) => {
+    setScannerError('Camera error: ' + error);
+  }, []);
+
+  const handleScanClose = useCallback(() => {
+    setScreen('pos');
   }, []);
 
   const handleDeduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!scannedWallet?.id || !vendor || !deductAmount) return;
+    const amount = parseFloat(deductAmount);
+    if (isNaN(amount) || amount <= 0) return;
 
     setProcessing(true);
     setDeductResult(null);
@@ -163,7 +154,7 @@ export default function VendorPOS() {
       const result = await processDeduction(
         scannedWallet.id,
         vendor.id,
-        parseFloat(deductAmount)
+        amount
       );
       setDeductResult(result);
       if (result.success) {
@@ -183,18 +174,8 @@ export default function VendorPOS() {
     setDeductAmount(amount.toString());
   };
 
-  const handleHistoryClick = async () => {
-    if (!vendor) return;
+  const handleHistoryClick = () => {
     setTab('history');
-    setHistoryLoading(true);
-    try {
-      const txns = await getVendorTransactions(vendor.id);
-      setTransactionsHistory(txns || []);
-    } catch {
-      // Silently handle
-    } finally {
-      setHistoryLoading(false);
-    }
   };
 
   const handleLogout = () => {
@@ -208,6 +189,11 @@ export default function VendorPOS() {
     setDeductAmount('');
     setLoginCode('');
     setTab('pos');
+    setTransactionsHistory([]);
+    setHistoryLoading(false);
+    setLoginError('');
+    setScannerError('');
+    setLoginLoading(false);
   };
 
   const totalHistory = transactionsHistory.reduce((sum: number, tx: any) => sum + Number(tx.amount), 0);
@@ -288,7 +274,7 @@ export default function VendorPOS() {
             {/* POS Tab */}
             {tab === 'pos' && (
               <div className="space-y-4">
-                <Button onClick={startScanner} variant="accent" className="w-full" size="lg">
+                <Button onClick={() => setScreen('scan')} variant="accent" className="w-full" size="lg">
                   📷 Scan QR Code
                 </Button>
 
@@ -412,82 +398,11 @@ export default function VendorPOS() {
 
         {/* Scanner overlay when in scan screen */}
         {screen === 'scan' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold text-white">Scan QR Code</h3>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  if (scannerRef.current) {
-                    scannerRef.current.stop().catch(() => {});
-                    scannerRef.current = null;
-                  }
-                  setScreen('pos');
-                }}
-              >
-                Back
-              </Button>
-            </div>
-
-            <div id="reader" className="w-full rounded-lg overflow-hidden bg-dark-900" />
-
-            {scannerError && (
-              <div className="p-2 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm">
-                {scannerError}
-              </div>
-            )}
-
-            {scannedWallet && (
-              <div className="p-4 bg-dark-900 rounded-lg border border-dark-600 space-y-4">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-dark-400 text-xs">Wallet ID</p>
-                    <p className="text-white font-mono text-sm">...{scannedWallet.id?.slice(-8)}</p>
-                  </div>
-                  <div>
-                    <p className="text-dark-400 text-xs">Balance</p>
-                    <p className="text-xl font-bold text-green-400">{formatCurrency(Number(scannedWallet.balance))}</p>
-                  </div>
-                </div>
-                <Badge variant={scannedWallet.status === 'ACTIVE' ? 'success' : 'danger'}>
-                  {scannedWallet.status}
-                </Badge>
-
-                <form onSubmit={handleDeduct} className="flex gap-2">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    max={Number(scannedWallet.balance)}
-                    placeholder="Deduction amount"
-                    value={deductAmount}
-                    onChange={e => setDeductAmount(e.target.value)}
-                    className="input-field flex-1"
-                    required
-                  />
-                  <Button type="submit" loading={processing} variant="danger">
-                    Deduct
-                  </Button>
-                </form>
-
-                {deductResult && (
-                  <div className={cn(
-                    'p-3 rounded-lg text-sm',
-                    deductResult.success
-                      ? 'bg-green-500/10 border border-green-500/30 text-green-400'
-                      : 'bg-red-500/10 border border-red-500/30 text-red-400'
-                  )}>
-                    {deductResult.success ? (
-                      <>✓ Deducted {formatCurrency(deductResult.deducted_amount)}! New balance: {formatCurrency(deductResult.new_balance)}</>
-                    ) : (
-                      <>✗ {deductResult.error}</>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          <QRScannerClient
+            onScan={handleScanResult}
+            onError={handleScanError}
+            onClose={handleScanClose}
+          />
         )}
       </Card>
     </div>

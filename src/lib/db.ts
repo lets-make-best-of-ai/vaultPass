@@ -125,15 +125,30 @@ export async function authenticateVendor(loginCode: string) {
     p_login_code: loginCode,
   });
   if (error) throw new Error(error.message);
-  return data;
+  const rows = Array.isArray(data) ? data : [data].filter(Boolean);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+export async function authenticateCashier(loginCode: string) {
+  const { data, error } = await supabase.rpc('authenticate_cashier', {
+    p_login_code: loginCode,
+  });
+  if (error) throw new Error(error.message);
+  const rows = Array.isArray(data) ? data : [data].filter(Boolean);
+  return rows.length > 0 ? rows[0] : null;
 }
 
 export async function getVendorSales(vendorId: string) {
+  const end = new Date().toISOString().split('T')[0];
+  const start = new Date(2026, 0, 1).toISOString().split('T')[0];
   const { data, error } = await supabase.rpc('get_vendor_sales', {
     p_vendor_id: vendorId,
+    p_start_date: start,
+    p_end_date: end,
   });
   if (error) throw new Error(error.message);
-  return data;
+  const rows = Array.isArray(data) ? data : [data].filter(Boolean);
+  return rows.length > 0 ? rows[0] : null;
 }
 
 export async function getVendorTransactions(vendorId: string) {
@@ -141,6 +156,9 @@ export async function getVendorTransactions(vendorId: string) {
     p_vendor_id: vendorId,
   });
   if (error) throw new Error(error.message);
+  if (data && typeof data === 'object' && 'transactions' in data) {
+    return data.transactions;
+  }
   return data;
 }
 

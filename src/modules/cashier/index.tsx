@@ -7,7 +7,7 @@ import {
   Ban, Camera, X, PlusCircle, Check, AlertCircle, Printer as PrinterIcon,
   ChevronRight, Wrench
 } from 'lucide-react';
-import { registerVisitor, topUpWallet, replaceLostTicket, getRecentTransactions, voidTransaction, getVisitorsByPhone } from '@/lib/db';
+import { registerVisitor, topUpWallet, replaceLostTicket, getRecentTransactions, voidTransaction, getVisitorsByPhone, authenticateCashier } from '@/lib/db';
 import { printQRWalletTicket, printTopUpReceipt, printReplacementReceipt, requestUSBDevice } from '@/lib/printer';
 import { formatCurrency } from '@/lib/utils';
 import Button from '@/components/ui/button';
@@ -39,6 +39,10 @@ export default function CashierStation() {
   const [activeTab, setActiveTab] = useState<Tab>('register');
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [cashier, setCashier] = useState<any>(null);
+  const [loginCode, setLoginCode] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
 
   // --- Register state ---
   const [regName, setRegName] = useState('Taylor Reed');
@@ -53,7 +57,8 @@ export default function CashierStation() {
     name: 'Jordan Lee',
     phone: '+1 (555) 782-9014',
     balance: 34.50,
-    walletId: 'WLT-8921-QR'
+    walletId: 'WLT-8921-QR',
+    qrHash: 'a900c80009669f87bf499ff0cb72d620'
   });
   const [topupAddAmount, setTopupAddAmount] = useState(20);
   const [hasWallet, setHasWallet] = useState(false);
@@ -64,7 +69,8 @@ export default function CashierStation() {
     name: 'Marcus Vance',
     phone: '+1 (555) 612-4019',
     balance: 87.50,
-    walletId: 'WLT-6124-LOST'
+    walletId: 'WLT-6124-LOST',
+    qrHash: 'c900c80009669f87bf499ff0cb72d622'
   });
   const [showRecoveryDetails, setShowRecoveryDetails] = useState(false);
   const [showVoidModal, setShowVoidModal] = useState(false);
@@ -88,6 +94,26 @@ export default function CashierStation() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginCode.trim()) return;
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const result = await authenticateCashier(loginCode.trim());
+      if (result) {
+        setCashier(result);
+        setLoginCode('');
+      } else {
+        setLoginError('Invalid login code');
+      }
+    } catch (err: any) {
+      setLoginError(err.message || 'Authentication failed');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
 
   // --- Tab switching ---
   const switchTab = useCallback((tab: Tab) => {
@@ -121,7 +147,7 @@ export default function CashierStation() {
 
       showToast('Record inserted into public.visitors & public.wallets!', 'success');
 
-      // Print receipt
+      // Print receipt with QR hash (what the scanner reads)
       const device = await requestUSBDevice();
       setCurrentReceipt({
         jobType: 'NEW VISITOR REGISTRATION',
@@ -132,12 +158,12 @@ export default function CashierStation() {
         status: 'VERIFIED ACTIVE',
         balanceLabel: 'INITIAL WALLET BALANCE',
         balance: regDepositAmount,
-        barcode: `*${walletId}*`
+        barcode: `*${qrHash}*`
       });
       setShowReceiptModal(true);
 
       if (device) {
-        await printQRWalletTicket(walletId, regDepositAmount, regName, device);
+        await printQRWalletTicket(qrHash, regDepositAmount, regName, device);
       }
     } catch (err: any) {
       showToast(err.message, 'danger');
@@ -193,14 +219,14 @@ export default function CashierStation() {
     }
     try {
       const visitors = await getVisitorsByPhone(topupSearchQuery);
-      if (visitors.length === 0) {
+      if (!visitors || visitors.length === 0) {
         showToast('No visitor found with this phone', 'warning');
         setTopupVisitors([]);
         setTopupSelectedVisitor(null);
         setHasWallet(false);
       } else if (visitors.length === 1) {
         const v = visitors[0];
-        setActiveTopupWallet({ name: v.full_name, phone: v.phone, balance: Number(v.wallet_balance) || 0, walletId: v.wallet_id || 'N/A' });
+        setActiveTopupWallet({ name: v.full_name, phone: v.phone, balance: Number(v.wallet_balance) || 0, walletId: v.wallet_id || 'N/A', qrHash: v.wallet_qr_hash });
         setTopupSelectedVisitor(v);
         setHasWallet(true);
         setTopupVisitors([]);
@@ -218,7 +244,7 @@ export default function CashierStation() {
 
   // --- Top-up: select visitor from list ---
   const selectVisitor = useCallback((v: any) => {
-    setActiveTopupWallet({ name: v.full_name, phone: v.phone, balance: Number(v.wallet_balance) || 0, walletId: v.wallet_id || 'N/A' });
+    setActiveTopupWallet({ name: v.full_name, phone: v.phone, balance: Number(v.wallet_balance) || 0, walletId: v.wallet_id || 'N/A', qrHash: v.wallet_qr_hash });
     setTopupSelectedVisitor(v);
     setHasWallet(true);
     setTopupVisitors([]);
@@ -240,7 +266,8 @@ export default function CashierStation() {
       name: 'Jordan Lee (Scanned)',
       phone: '+1 (555) 782-9014',
       balance: 34.50,
-      walletId: 'WLT-8921-QR'
+      walletId: 'WLT-8921-QR',
+      qrHash: 'a900c80009669f87bf499ff0cb72d620'
     };
     setActiveTopupWallet(wallet);
     setHasWallet(true);
@@ -281,6 +308,8 @@ export default function CashierStation() {
 
       showToast(`Added +${formatCurrency(topupAddAmount)} to ${activeTopupWallet.name}'s wallet`, 'success');
 
+      // Use QR hash for barcode (what the scanner reads)
+      const qrHash = activeTopupWallet.qrHash || activeTopupWallet.walletId;
       const device = await requestUSBDevice();
       setCurrentReceipt({
         jobType: 'CASH TOP-UP COMPLETED',
@@ -291,12 +320,12 @@ export default function CashierStation() {
         status: 'VERIFIED ACTIVE',
         balanceLabel: 'NEW BALANCE',
         balance: newBal,
-        barcode: `*${activeTopupWallet.walletId}*`
+        barcode: `*${qrHash}*`
       });
       setShowReceiptModal(true);
 
       if (device) {
-        await printTopUpReceipt(activeTopupWallet.walletId, newBal, topupAddAmount, 'Jane Doe #104', device);
+        await printTopUpReceipt(qrHash, newBal, topupAddAmount, 'Jane Doe #104', device);
       }
     } catch (err: any) {
       showToast(err.message, 'danger');
@@ -306,18 +335,38 @@ export default function CashierStation() {
   }, [topupAddAmount, activeTopupWallet, showToast]);
 
   // --- Recovery: search ---
-  const searchLostTicket = useCallback(() => {
+  const searchLostTicket = useCallback(async () => {
     if (!recoveryPhone.trim()) {
       showToast('Enter attendee phone to locate', 'warning');
       return;
     }
     setShowRecoveryDetails(true);
-    showToast('Wallet located for recovery protocol', 'success');
+    try {
+      const visitors = await getVisitorsByPhone(recoveryPhone);
+      if (visitors && visitors.length > 0) {
+        const v = visitors[0];
+        setActiveRecoveryWallet({
+          name: v.full_name,
+          phone: v.phone,
+          balance: Number(v.wallet_balance) || 0,
+          walletId: v.wallet_id || 'N/A',
+          qrHash: v.wallet_qr_hash || v.wallet_id || 'N/A',
+        });
+        setShowRecoveryDetails(true);
+        showToast('Wallet located for recovery protocol', 'success');
+      } else {
+        showToast('No visitor found with this phone', 'warning');
+        setShowRecoveryDetails(false);
+      }
+    } catch (err: any) {
+      showToast(err.message, 'danger');
+      setShowRecoveryDetails(false);
+    }
   }, [recoveryPhone, showToast]);
 
   // --- Recovery: populate test ---
-  const populateRecovery = useCallback((name: string, phone: string, balance: number, walletId: string) => {
-    setActiveRecoveryWallet({ name, phone, balance, walletId });
+  const populateRecovery = useCallback((name: string, phone: string, balance: number, walletId: string, qrHash?: string) => {
+    setActiveRecoveryWallet({ name, phone, balance, walletId, qrHash: qrHash || walletId });
     setShowRecoveryDetails(true);
     setRecoveryPhone(phone);
   }, []);
@@ -379,6 +428,12 @@ export default function CashierStation() {
     setCurrentReceipt(null);
   }, []);
 
+  const handleLogout = () => {
+    setCashier(null);
+    setActiveTab('register');
+    setToast(null);
+  };
+
   // --- Highlight helpers ---
   const highlightRegButtons = (val: number) => {
     // Handled via inline state in JSX
@@ -389,8 +444,51 @@ export default function CashierStation() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col antialiased overflow-x-hidden pb-12">
-      {/* TOP HEADER / CASHIER STATUS BAR */}
-      <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3 shadow-lg">
+      {/* Screen A: Cashier Login */}
+      {!cashier && (
+        <form onSubmit={handleLogin} className="min-h-screen flex items-center justify-center bg-slate-950">
+          <div className="max-w-md mx-auto p-6 space-y-6">
+            <Card>
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mx-auto mb-4 shadow-inner">
+                  <Zap className="w-8 h-8" />
+                </div>
+                <h2 className="text-xl font-bold text-white">EventWallet Terminal</h2>
+                <p className="text-dark-400 text-sm mt-1">Sign in to access the cashier station</p>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                    Login Code
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter login code"
+                    value={loginCode}
+                    onChange={e => setLoginCode(e.target.value.toUpperCase())}
+                    className="input-field text-center text-lg"
+                    autoFocus
+                  />
+                </div>
+                {loginError && (
+                  <div className="p-2 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm text-center">
+                    {loginError}
+                  </div>
+                )}
+                <Button type="submit" loading={loginLoading} variant="primary" className="w-full" size="lg">
+                  Sign In
+                </Button>
+              </div>
+            </Card>
+          </div>
+        </form>
+      )}
+
+      {cashier && (
+        <>
+          {/* Screen B: POS */}
+          {/* TOP HEADER / CASHIER STATUS BAR */}
+          <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3 shadow-lg">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
             <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-inner">
@@ -416,6 +514,9 @@ export default function CashierStation() {
             >
               <Printer className="w-4 h-4" />
               <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            </button>
+            <button onClick={handleLogout} className="p-2 rounded-lg bg-rose-900/50 hover:bg-rose-900/70 border border-rose-800 text-rose-300 hover:text-white transition" title="Logout">
+              <User className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -713,21 +814,21 @@ export default function CashierStation() {
                </div>
              )}
 
-             <div className="flex items-center gap-1.5 mt-2.5 text-[11px] text-slate-400 overflow-x-auto pb-1">
-               <span className="shrink-0 text-slate-500">Try sample:</span>
-               <button
-                 onClick={() => { setActiveTopupWallet({ name: 'Jordan Lee', phone: '+1 (555) 782-9014', balance: 34.50, walletId: 'WLT-8921-QR' }); setHasWallet(true); }}
-                 className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 hover:text-white font-mono shrink-0"
-               >
-                 Jordan ($34.50)
-               </button>
-               <button
-                 onClick={() => { setActiveTopupWallet({ name: 'Elena Rostova', phone: '+1 (555) 441-2099', balance: 12.00, walletId: 'WLT-4412-QR' }); setHasWallet(true); }}
-                 className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 hover:text-white font-mono shrink-0"
-               >
-                 Elena ($12.00)
-               </button>
-             </div>
+<div className="flex items-center gap-1.5 mt-2.5 text-[11px] text-slate-400 overflow-x-auto pb-1">
+                <span className="shrink-0 text-slate-500">Try sample:</span>
+                <button
+                  onClick={() => { setActiveTopupWallet({ name: 'Jordan Lee', phone: '+1 (555) 782-9014', balance: 34.50, walletId: 'WLT-8921-QR', qrHash: 'a900c80009669f87bf499ff0cb72d620' }); setHasWallet(true); }}
+                  className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 hover:text-white font-mono shrink-0"
+                >
+                  Jordan ($34.50)
+                </button>
+                <button
+                  onClick={() => { setActiveTopupWallet({ name: 'Elena Rostova', phone: '+1 (555) 441-2099', balance: 12.00, walletId: 'WLT-4412-QR', qrHash: 'b900c80009669f87bf499ff0cb72d621' }); setHasWallet(true); }}
+                  className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 hover:text-white font-mono shrink-0"
+                >
+                  Elena ($12.00)
+                </button>
+              </div>
            </Card>
 
            {hasWallet && (
@@ -912,13 +1013,13 @@ export default function CashierStation() {
             <div className="mt-3 flex items-center gap-2 overflow-x-auto text-[11px] text-slate-400 pb-1">
               <span className="text-slate-500 shrink-0">Test cases:</span>
               <button
-                onClick={() => populateRecovery('Marcus Vance', '+1 (555) 612-4019', 87.50, 'WLT-6124-LOST')}
+                onClick={() => populateRecovery('Marcus Vance', '+1 (555) 612-4019', 87.50, 'WLT-6124-LOST', 'c900c80009669f87bf499ff0cb72d622')}
                 className="px-2 py-1 rounded bg-slate-800 border border-slate-700 hover:text-white font-mono shrink-0"
               >
                 Marcus ($87.50)
               </button>
               <button
-                onClick={() => populateRecovery('Samantha Chen', '+1 (555) 902-1188', 42.00, 'WLT-9021-LOST')}
+                onClick={() => populateRecovery('Samantha Chen', '+1 (555) 902-1188', 42.00, 'WLT-9021-LOST', 'd900c80009669f87bf499ff0cb72d623')}
                 className="px-2 py-1 rounded bg-slate-800 border border-slate-700 hover:text-white font-mono shrink-0"
               >
                 Samantha ($42.00)
@@ -1216,6 +1317,8 @@ export default function CashierStation() {
           <span>{toast?.message}</span>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

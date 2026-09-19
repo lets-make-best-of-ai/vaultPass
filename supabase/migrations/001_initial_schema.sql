@@ -339,14 +339,14 @@ $$;
 -- Look up visitor(s) by phone number
 -- ============================================================
 CREATE OR REPLACE FUNCTION public.get_visitors_by_phone(p_phone TEXT)
-RETURNS TABLE(id UUID, full_name TEXT, phone TEXT, email TEXT, payment_method TEXT, notes TEXT, created_at TIMESTAMPTZ, wallet_id UUID, wallet_balance NUMERIC(10,2), wallet_status TEXT)
+RETURNS TABLE(id UUID, full_name TEXT, phone TEXT, email TEXT, payment_method TEXT, notes TEXT, created_at TIMESTAMPTZ, wallet_id UUID, wallet_qr_hash TEXT, wallet_balance NUMERIC(10,2), wallet_status TEXT)
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
     RETURN QUERY
     SELECT v.id, v.full_name, v.phone, v.email, v.payment_method, v.notes, v.created_at,
-           w.id AS wallet_id, w.balance AS wallet_balance, w.status AS wallet_status
+           w.id AS wallet_id, w.qr_code_hash AS wallet_qr_hash, w.balance AS wallet_balance, w.status AS wallet_status
     FROM public.visitors v
     LEFT JOIN public.wallets w ON w.visitor_id = v.id
     WHERE v.phone = p_phone;
@@ -503,6 +503,43 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.authenticate_vendor TO anon, authenticated;
+
+-- ============================================================
+-- CASHIER CREDENTIALS TABLE
+-- Stores login codes for cashier terminal access
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.cashier_credentials (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    login_code TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- STORED PROCEDURE: authenticate_cashier
+-- Validates a cashier login code and returns cashier info
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.authenticate_cashier(p_login_code TEXT)
+RETURNS TABLE(id UUID, name TEXT, is_active BOOLEAN, login_code TEXT)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT c.id, c.name, c.is_active, c.login_code
+    FROM public.cashier_credentials c
+    WHERE c.login_code = p_login_code AND c.is_active = true;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.authenticate_cashier TO anon, authenticated;
+
+INSERT INTO public.cashier_credentials (user_id, login_code, name, is_active)
+VALUES ('00000000-0000-0000-0000-000000000001', 'CASH123', 'Default Cashier', true)
+ON CONFLICT (login_code) DO NOTHING;
 
 -- ============================================================
 -- STORED PROCEDURE: get_vendor_sales
