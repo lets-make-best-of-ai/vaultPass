@@ -231,7 +231,8 @@ CREATE OR REPLACE FUNCTION public.register_visitor(
     p_phone TEXT,
     p_email TEXT,
     p_payment_method TEXT DEFAULT 'CASH',
-    p_notes TEXT DEFAULT NULL
+    p_notes TEXT DEFAULT NULL,
+    p_initial_amount NUMERIC(10,2) DEFAULT 0.00
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -241,6 +242,7 @@ DECLARE
     v_visitor_id UUID;
     v_wallet_id UUID;
     v_qr_hash TEXT;
+    v_transaction_id UUID;
 BEGIN
     -- Insert visitor (email no longer unique - allow duplicates)
     INSERT INTO public.visitors (full_name, phone, email, payment_method, notes)
@@ -250,16 +252,24 @@ BEGIN
     -- Generate unique QR hash
     v_qr_hash := md5(gen_random_uuid()::text || clock_timestamp()::text);
 
-    -- Create wallet linked to visitor
+    -- Create wallet linked to visitor with initial balance
     INSERT INTO public.wallets (visitor_id, qr_code_hash, balance, status)
-    VALUES (v_visitor_id, v_qr_hash, 0.00, 'ACTIVE')
+    VALUES (v_visitor_id, v_qr_hash, p_initial_amount, 'ACTIVE')
     RETURNING id INTO v_wallet_id;
+
+    -- Record initial deposit as TOPUP transaction
+    IF p_initial_amount > 0 THEN
+        INSERT INTO public.transactions (wallet_id, cashier_id, amount, type)
+        VALUES (v_wallet_id, '00000000-0000-0000-0000-000000000001', p_initial_amount, 'TOPUP')
+        RETURNING id INTO v_transaction_id;
+    END IF;
 
     RETURN jsonb_build_object(
         'success', true,
         'visitor_id', v_visitor_id,
         'wallet_id', v_wallet_id,
-        'qr_code_hash', v_qr_hash
+        'qr_code_hash', v_qr_hash,
+        'transaction_id', v_transaction_id
     );
 END;
 $$;

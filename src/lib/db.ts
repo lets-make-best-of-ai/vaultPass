@@ -6,7 +6,8 @@ export async function registerVisitor(
   phone: string,
   email: string | null,
   paymentMethod: string = 'CASH',
-  notes: string | null = null
+  notes: string | null = null,
+  amount: number = 0
 ) {
   const { data, error } = await supabase.rpc('register_visitor', {
     p_full_name: fullName,
@@ -14,6 +15,7 @@ export async function registerVisitor(
     p_email: email,
     p_payment_method: paymentMethod,
     p_notes: notes,
+    p_initial_amount: amount.toString(),
   });
   if (error) throw new Error(error.message);
   return data;

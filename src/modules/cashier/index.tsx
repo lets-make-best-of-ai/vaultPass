@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   Zap, Printer, User, Phone, Mail, Wallet, CircleDollarSign, ShieldAlert,
   ScanQrCode, Search, Info, Database, Cpu, CheckCircle2, AlertTriangle,
@@ -115,7 +115,7 @@ export default function CashierStation() {
     }
     setLoading(true);
     try {
-      const data = await registerVisitor(regName, regPhone, regEmail || null, regPaymentMethod);
+      const data = await registerVisitor(regName, regPhone, regEmail || null, regPaymentMethod, null, regDepositAmount);
       const walletId = data.wallet_id || 'WLT-' + Math.floor(1000 + Math.random() * 9000) + '-EVT';
       const qrHash = data.qr_code_hash || walletId;
 
@@ -155,6 +155,13 @@ export default function CashierStation() {
       showToast(err.message, 'danger');
     }
   }, [showToast]);
+
+  // Auto-load transactions when switching to history tab
+  useEffect(() => {
+    if (activeTab === 'history') {
+      loadTransactions();
+    }
+  }, [activeTab, loadTransactions]);
 
   // --- Void a transaction ---
   const handleVoidClick = useCallback((txId: string) => {
