@@ -55,6 +55,23 @@ EventWallet PWA — a closed-loop event payment system with visitor registration
 **Files changed**:
 - `src/modules/cashier/index.tsx` — `executeTopUp` callback
 
+### Bug 5: Registration doesn't create transaction or credit initial deposit
+**Symptom**: New visitor registration appears to succeed but doesn't show in History tab. Wallet balance is $0.00 even when user selected initial deposit (e.g., $50).
+
+**Root Cause**: The `register_visitor` SQL function created a visitor and wallet but didn't:
+1. Accept an initial deposit amount parameter
+2. Set the wallet balance to the deposit amount (hardcoded to `0.00`)
+3. Create a `TOPUP` transaction for the initial deposit
+
+The `handleRegistrationSubmit` also didn't pass `regDepositAmount` to the function. So the wallet always started at $0.00 and no transaction was recorded.
+
+**Fix**: Added `p_initial_amount NUMERIC(10,2) DEFAULT 0.00` parameter to `register_visitor`. Wallet now gets `p_initial_amount` as balance. A `TOPUP` transaction is created when `p_initial_amount > 0`. Frontend passes `regDepositAmount` to `registerVisitor`.
+
+**Files changed**:
+- `supabase/migrations/001_initial_schema.sql` — Added `p_initial_amount` param, credit wallet, create TOPUP transaction
+- `src/lib/db.ts` — Added `amount` parameter to `registerVisitor`
+- `src/modules/cashier/index.tsx` — Pass `regDepositAmount`, auto-load transactions on history tab
+
 ---
 
 ## Patterns & Skills for Similar Projects
@@ -111,7 +128,7 @@ EventWallet PWA — a closed-loop event payment system with visitor registration
 
 | Function | Purpose | Key Params |
 |----------|---------|------------|
-| `register_visitor` | Create visitor + wallet | `p_full_name, p_phone, p_email, p_payment_method, p_notes` |
+| `register_visitor` | Create visitor + wallet | `p_full_name, p_phone, p_email, p_payment_method, p_notes, p_initial_amount` |
 | `top_up_wallet` | Add funds to wallet | `p_wallet_id, p_cashier_id, p_amount` |
 | `process_vendor_deduction` | Spend from wallet | `p_wallet_id, p_vendor_id, p_amount` |
 | `replace_lost_ticket` | Void old wallet, create new | `p_old_wallet_id, p_cashier_id` |
