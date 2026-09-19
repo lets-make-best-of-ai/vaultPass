@@ -72,6 +72,19 @@ The `handleRegistrationSubmit` also didn't pass `regDepositAmount` to the functi
 - `src/lib/db.ts` — Added `amount` parameter to `registerVisitor`
 - `src/modules/cashier/index.tsx` — Pass `regDepositAmount`, auto-load transactions on history tab
 
+### Bug 6: No vendor login code system, no home screen, no history
+**Symptom**: Vendor POS had no login mechanism (just raw UUID input), no dashboard showing total sales, no history tab.
+
+**Root Cause**: The vendor module was built with only a basic QR scan + deduct form. The `vendors` table had no `login_code` column, no authentication SQL function, no API endpoint for vendor login, and the component lacked any dashboard or history UI. The `process_vendor_deduction` function didn't verify PIN.
+
+**Fix**: 
+- Added `login_code TEXT UNIQUE` column to `vendors` table
+- Created `authenticate_vendor(p_login_code)` SQL function
+- Created `get_vendor_sales` and `get_vendor_transactions` SQL functions
+- Added `/api/vendor/auth` API route
+- Rewrote `src/modules/vendor/index.tsx` with Login → POS Home (total sales, scan, quick deduct) → History screens
+- Added `.input-field` CSS styles for consistent form inputs
+
 ---
 
 ## Patterns & Skills for Similar Projects
@@ -106,7 +119,24 @@ The `handleRegistrationSubmit` also didn't pass `regDepositAmount` to the functi
 
 **Rule of thumb**: Wrap printer calls in try/catch and handle the `null` device gracefully. Consider showing a toast like "Receipt ready (print skipped)" instead of blocking the UI.
 
-### 6. Migration File as Source of Truth
+### 6. Vendor Authentication via Login Code
+**Pattern**: For event-based vendor access, use a unique login code shared per event rather than UUID+PIN. Store as `login_code TEXT UNIQUE` on the vendors table.
+
+**Rule of thumb**: 
+- Create `authenticate_vendor(login_code)` SQL function that returns vendor id/name on success
+- Create a `/api/vendor/auth` endpoint for client-side authentication
+- The vendor UUID is then looked up server-side and used for all subsequent operations
+- Don't store PINs with weak md5; use `crypt()` with bcrypt
+
+### 7. Multi-Agent Development Pattern
+**Pattern**: When building complex features with multiple components (DB, frontend, testing), use parallel task agents:
+1. Architect review agent → analyzes current state, identifies gaps
+2. Builder agent → implements all code and DB changes
+3. Tester agent → verifies everything end-to-end
+
+**Rule of thumb**: Launch all three agents in parallel. The builder needs the architecture review context but doesn't need to wait for it. The tester can start DB verification while the builder is writing code.
+
+### 8. Migration File as Source of Truth
 **Pattern**: The Supabase migration file should contain ALL database changes. When fixing bugs in production via `supabase_execute_sql`, also update the migration file so the fix is reproducible.
 
 **Rule of thumb**: Every SQL change made directly on the database should be reflected in the migration file.
@@ -135,6 +165,9 @@ The `handleRegistrationSubmit` also didn't pass `regDepositAmount` to the functi
 | `get_visitors_by_phone` | Lookup visitor + wallet | `p_phone` |
 | `get_recent_transactions` | Last 20 transactions | None |
 | `void_transaction` | Mark tx as VOIDED | `p_transaction_id` |
+| `authenticate_vendor` | Validate vendor login code | `p_login_code` |
+| `get_vendor_sales` | Get vendor total sales | `p_vendor_id, p_start_date, p_end_date` |
+| `get_vendor_transactions` | Get vendor transaction history | `p_vendor_id, p_limit` |
 
 ---
 
